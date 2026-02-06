@@ -1,9 +1,11 @@
 pub trait Table {
+    type TypeId;
+
     fn nrows(&self) -> usize;
     fn ncols(&self) -> usize;
-    fn size(&self) -> (usize, usize) { (self.nrows(), self.ncols()) };
+    fn size(&self) -> (usize, usize) { (self.nrows(), self.ncols()) }
     fn is_empty(&self) -> bool { self.size() == (0, 0) }
-    fn schema(&self) -> &dyn Schema;
+    fn schema(&self) -> &dyn Schema<TypeId = Self::TypeId>;
 }
 
 pub trait Schema {
@@ -14,9 +16,7 @@ pub trait Schema {
     fn field_type(&self, index: usize) -> Self::TypeId;
 }
 
-pub trait TableMut: Table {
-
-}
+pub trait TableMut: Table { }
 
 pub trait TableClone: Table {
     type Column;
@@ -28,9 +28,7 @@ pub trait TableClone: Table {
     fn clone_rows(&self, cols: std::ops::Range<usize>) -> Option<Vec<Self::Row>>;
 }
 
-pub trait TableTransform: Table {
-
-}
+pub trait TableTransform: Table { }
 
 
 pub mod loc {
@@ -83,7 +81,6 @@ pub mod loc {
 
 
 
-
     // Mutable Locators
     pub trait RowLocMut: TableMut {
         type RowMut<'a>
@@ -103,7 +100,7 @@ pub mod loc {
         where
             Self: 'a;
 
-        type ColumnIterMut<'a>: Iterator<Item = Self::ColumnMut<'_>>
+        type ColumnIterMut<'a>: Iterator<Item = Self::ColumnMut<'a>>
         where
             Self: 'a;
 
@@ -127,7 +124,7 @@ pub mod loc {
         fn range_mut(&self, rows: std::ops::Range<usize>, cols: std::ops::Range<usize>) -> Self::RangeMut<'_>;
     }
 
-    pub trait TableViewMut: RowViewMut + ColumnViewMut + CellViewMut + RangeViewMut {}
+    pub trait TableLocMut: RowLocMut + ColumnLocMut + CellLocMut + RangeLocMut {}
 
 
     // Clone Locators
@@ -159,19 +156,19 @@ pub mod loc {
         fn range_clone(&self, rows: std::ops::Range<usize>, cols: std::ops::Range<usize>) -> Self::RangeClone;
     }
 
-    pub trait TableViewClone: RowViewClone + ColumnViewClone + CellViewClone + RangeViewClone {}
+    pub trait TableLocClone: RowLocClone + ColumnLocClone + CellLocClone + RangeLocClone {}
 
 
     // Transform Locators
-    pub trait RowLocTransform {
+    pub trait RowLocTransform: TableTransform {
         type RowTransform;
         type RowIterTransform: Iterator<Item = Self::RowTransform>;
 
         fn to_row(self, index: usize) -> Option<Self::RowTransform>;
-        fn to_rows(self) -> Self::RowIterTransform
+        fn to_rows(self) -> Self::RowIterTransform;
     }
 
-    pub trait ColumnLocTransform {
+    pub trait ColumnLocTransform: TableTransform {
         type ColumnTransform;
         type ColumnIterTransform: Iterator<Item = Self::ColumnTransform>;
 
@@ -184,61 +181,66 @@ pub mod loc {
 
 pub mod sort {
     use super::{ TableMut, TableClone, TableTransform };
+    use super::loc:: {
+        RowLocView,
+        RowLocClone,
+        RowLocTransform,
+        ColumnLocView,
+        ColumnLocClone,
+        ColumnLocTransform
+    };
 
-    pub trait RowSortMut: TableMut + RowView {
-        fn sort_rows_mut<K, F>(&mut self, f: F) -> Result<(), &'static str> {
+    pub trait RowSortMut: TableMut + RowLocView {
+        fn sort_rows_mut<K, F>(&mut self, f: F) -> Result<(), &'static str>
             where
                 F: Fn(&Self::Row<'_>) -> K,
-                K: Ord
-        }
+                K: Ord;
     }
 
-    pub trait RowSortClone: TableClone + RowView + Sized {
-        fn sort_rows_clone<K, F>(&self, f: F) -> Result<Self, &'static str> {
+    pub trait RowSortClone: TableClone + RowLocClone + Sized {
+        fn sort_rows_clone<K, F>(&self, f: F) -> Result<Self, &'static str>
             where
-                F: Fn(&Self::Row<'_>) -> K,
-                K: Ord
-        }
+                F: Fn(&Self::RowClone) -> K,
+                K: Ord;
     }
 
-    pub trait RowSortTransform: TableTransform + RowView + Sized {
-        fn sort_rows<K, F>(self, f: F) -> Result<Self, &'static str> {
+    pub trait RowSortTransform: TableTransform + RowLocTransform + Sized {
+        fn sort_rows<K, F>(self, f: F) -> Result<Self, &'static str>
             where
-                F: Fn(&Self::Row<'_>) -> K,
-                K: Ord
-        }
+                F: Fn(&Self::RowTransform) -> K,
+                K: Ord;
     }
 
 
 
-    pub trait ColumnSortMut: TableMut + ColumnView {
-        fn sort_cols_mut<K, F>(&mut self, f: F) -> Result<(), &'static str> {
+    pub trait ColumnSortMut: TableMut + ColumnLocView {
+        fn sort_cols_mut<K, F>(&mut self, f: F) -> Result<(), &'static str>
             where
                 F: Fn(&Self::Column<'_>) -> K,
-                K: Ord
-        }
+                K: Ord;
     }
 
-    pub trait ColumnSortClone: TableClone + ColumnView + Sized {
-        fn sort_cols_clone<K, F>(&self, f: F) -> Result<Self, &'static str> {
+    pub trait ColumnSortClone: TableClone + ColumnLocClone + Sized {
+        fn sort_cols_clone<K, F>(&self, f: F) -> Result<Self, &'static str>
             where
-                F: Fn(&Self::Column<'_>) -> K,
-                K: Ord
-        }
+                F: Fn(&Self::ColumnClone) -> K,
+                K: Ord;
     }
 
-    pub trait ColumnSortTransform: TableTransform + ColumnView + Sized {
-        fn sort_cols<K, F>(self, f: F) -> Result<Self, &'static str> {
+    pub trait ColumnSortTransform: TableTransform + ColumnLocTransform + Sized {
+        fn sort_cols<K, F>(self, f: F) -> Result<Self, &'static str>
             where
-                F: Fn(&Self::Column<'_>) -> K,
-                K: Ord
-        }
+                F: Fn(&Self::ColumnTransform) -> K,
+                K: Ord;
     }
 }
 
 
 pub mod map {
-    pub trait MapMut: TableMut + RowView {
+    use super::{ TableMut };
+    use super::loc:: { RowLocView };
+
+    pub trait MapMut: TableMut + RowLocView {
 
     }
 }
