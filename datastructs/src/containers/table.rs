@@ -33,11 +33,11 @@ pub trait TableTransform: Table {
 }
 
 
-pub mod view {
-    use super::TableMut;
+pub mod loc {
+    use super::{ Table, TableMut, TableClone, TableTransform };
 
-    // Read Only Views
-    pub trait RowView: Table {
+    // View Locators
+    pub trait RowLocView: Table {
         type Row<'a>
         where
             Self: 'a;
@@ -50,7 +50,7 @@ pub mod view {
         fn rows(&self) -> Self::RowIter<'_>;
     }
 
-    pub trait ColumnView: Table {
+    pub trait ColumnLocView: Table {
         type Column<'a>
         where
             Self: 'a;
@@ -59,11 +59,11 @@ pub mod view {
         where
             Self: 'a;
 
-        fn column(&self, index: usize) -> Option<Self::Column<'_>>;
-        fn columns(&self) -> Self::ColumnIter<'_>;
+        fn col(&self, index: usize) -> Option<Self::Column<'_>>;
+        fn cols(&self) -> Self::ColumnIter<'_>;
     }
 
-    pub trait CellView: Table {
+    pub trait CellLocView: Table {
         type Cell<'a>
         where
             Self: 'a;
@@ -71,27 +71,21 @@ pub mod view {
         fn cell(&self, r: usize, c: usize) -> &Self::Cell<'_>;
     }
 
-    pub trait RangeView: Table {
+    pub trait RangeLocView: Table {
         type Range<'a>
         where
-            Self: 'a
+            Self: 'a;
 
         fn range(&self, rows: std::ops::Range<usize>, cols: std::ops::Range<usize>) -> Self::Range<'_>;
     }
 
-    pub trait Locator<'a> {
-        type Output;
-
-        fn row(self, range: Range<usize>) -> Self;
-        fn col(self, range: Range<usize>) -> Self;
-        fn build(self) -> Self::Output;
-    }
-
-    pub trait TableView: RowView + ColumnView + CellView + RangeView {}
+    pub trait TableLocView: RowLocView + ColumnLocView + CellLocView + RangeLocView {}
 
 
-    // Mutable Views
-    pub trait RowViewMut: TableMut {
+
+
+    // Mutable Locators
+    pub trait RowLocMut: TableMut {
         type RowMut<'a>
         where
             Self: 'a;
@@ -100,20 +94,97 @@ pub mod view {
         where
             Self: 'a;
 
-        fn row(&mut self, index: usize) -> Option<Self::RowMut<'_>>;
-        fn rows(&mut self) -> Self::RowIterMut<'_>;
+        fn row_mut(&mut self, index: usize) -> Option<Self::RowMut<'_>>;
+        fn rows_mut(&mut self) -> Self::RowIterMut<'_>;
     }
 
+    pub trait ColumnLocMut: TableMut {
+        type ColumnMut<'a>
+        where
+            Self: 'a;
+
+        type ColumnIterMut<'a>: Iterator<Item = Self::ColumnMut<'_>>
+        where
+            Self: 'a;
+
+        fn col_mut(&mut self, index: usize) -> Option<Self::ColumnMut<'_>>;
+        fn cols_mut(&mut self) -> Self::ColumnIterMut<'_>;
+    }
+
+    pub trait CellLocMut: TableMut {
+        type CellMut<'a>
+        where
+            Self: 'a;
+
+        fn cell_mut(&mut self, r: usize, c: usize) -> &Self::CellMut<'_>;
+    }
+
+    pub trait RangeLocMut: TableMut {
+        type RangeMut<'a>
+        where
+            Self: 'a;
+
+        fn range_mut(&self, rows: std::ops::Range<usize>, cols: std::ops::Range<usize>) -> Self::RangeMut<'_>;
+    }
+
+    pub trait TableViewMut: RowViewMut + ColumnViewMut + CellViewMut + RangeViewMut {}
+
+
+    // Clone Locators
+    pub trait RowLocClone: TableClone {
+        type RowClone;
+        type RowIterClone: Iterator<Item = Self::RowClone>;
+
+        fn row_clone(&self, index: usize) -> Option<Self::RowClone>;
+        fn rows_clone(&self) -> Self::RowIterClone;
+    }
+
+    pub trait ColumnLocClone: TableClone {
+        type ColumnClone;
+        type ColumnIterClone: Iterator<Item = Self::ColumnClone>;
+
+        fn col_clone(&self, index: usize) -> Option<Self::ColumnClone>;
+        fn cols_clone(&self) -> Self::ColumnIterClone;
+    }
+
+    pub trait CellLocClone: TableClone {
+        type CellClone;
+
+        fn cell_clone(&self, r: usize, c: usize) -> Self::CellClone;
+    }
+
+    pub trait RangeLocClone: TableClone {
+        type RangeClone;
+
+        fn range_clone(&self, rows: std::ops::Range<usize>, cols: std::ops::Range<usize>) -> Self::RangeClone;
+    }
+
+    pub trait TableViewClone: RowViewClone + ColumnViewClone + CellViewClone + RangeViewClone {}
+
+
+    // Transform Locators
+    pub trait RowLocTransform {
+        type RowTransform;
+        type RowIterTransform: Iterator<Item = Self::RowTransform>;
+
+        fn to_row(self, index: usize) -> Option<Self::RowTransform>;
+        fn to_rows(self) -> Self::RowIterTransform
+    }
+
+    pub trait ColumnLocTransform {
+        type ColumnTransform;
+        type ColumnIterTransform: Iterator<Item = Self::ColumnTransform>;
+
+        fn to_col(self, index: usize) -> Option<Self::ColumnTransform>;
+        fn to_cols(self) -> Self::ColumnIterTransform;
+    }
 }
 
 
 
-
-
-
-
-
 pub mod sort {
+    use super::{ TableMut, TableClone, TableTransform };
+
     pub trait RowSortMut: TableMut + RowView {
         fn sort_rows_mut<K, F>(&mut self, f: F) -> Result<(), &'static str> {
             where
