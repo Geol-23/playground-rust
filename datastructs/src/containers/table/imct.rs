@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::default::Default;
 
 use super::traits::{ Table, Schema, TableMut };
@@ -19,22 +20,12 @@ impl Schema for ColumnarTableHeader {
 
 #[derive(Debug)]
 pub struct ColumnarTable<T: Sized + Clone> {
-    data: Vec<Vec<T>>,
+    data: HashMap<usize, Vec<T>>,
     header: ColumnarTableHeader
 }
 pub type ColTable<T> = ColumnarTable<T>;
 
 impl<T: Default + Clone> ColumnarTable<T> {
-    // pub fn new(data: Vec<Vec<T>>) -> Self {
-    //     let header = ColumnarTableHeader {
-    //         headers: vec![(String::new(), T::default()); data.len()]
-    //     };
-    //     Self {
-    //         data,
-    //         header
-    //     }
-    // }
-    //
     pub fn builder() -> ColumnarTableBuilder<T> {
         ColumnarTableBuilder {
             columns: Vec::new(),
@@ -47,7 +38,7 @@ impl<T: Clone + Sized> Table for ColumnarTable<T> {
     type TypeId = ();
 
     fn nrows(&self) -> usize {
-        match self.data.get(0) {
+        match self.data.get(&0) {
             None => 0,
             Some(d) => d.len()
         }
@@ -82,7 +73,10 @@ impl<T: Clone> ColumnarTableBuilder<T> {
 
     pub fn build(self) -> ColumnarTable<T> {
         ColumnarTable {
-            data: self.columns,
+            data: self.columns
+                .into_iter()
+                .enumerate()
+                .collect(),
             header: ColumnarTableHeader {
                 headers: self.headers
             }
