@@ -1,6 +1,5 @@
 pub mod containers;
 
-type Vec2D<T> = Vec<Vec<T>>;
 
 #[cfg(test)]
 mod tests {
@@ -8,41 +7,47 @@ mod tests {
 
     mod imct {
         use super::*;
-        use containers::imct::{ ColTable };
-        use containers::traits::Table;
+        use containers::table::{
+            imct::{ ColTable},
+            traits::{
+                Table,
+                loc::RowLocView
+            }
+        };
 
-        #[derive(Clone, Default, Debug)]
-        enum TestData {
-            #[default] None,
-            I32(i32),
-            U8(u8),
-            String(String)
+        fn create_test_table() -> ColTable {
+            let nrows: usize = 1_000;
+
+            ColTable::builder()
+                .column("A", vec![0i32; nrows])
+                .column("B", vec![0u8; nrows])
+                .column("C", vec!["Hello".to_string(); nrows])
+                .build()
         }
 
         #[test]
         fn basic() {
-            let nrows: usize = 10;
-
-            let table = ColTable::builder()
-                .column("A", vec![TestData::I32(0); nrows])
-                .column("B", vec![TestData::U8(0); nrows])
-                .column("C", vec![TestData::String("Hello".to_string()); nrows])
-                .build();
-
-            let table_empty: ColTable<Vec2D<u8>> = ColTable::builder().build();
-
-            assert_eq!(
-                std::mem::size_of::<ColTable<Vec2D<TestData>>>(),
-                std::mem::size_of::<ColTable<Vec2D<u8>>>()
-            )
+            let _ = create_test_table();
         }
 
         #[test]
         fn empty_table() {
-            let table: ColTable<Vec2D<u8>> = ColTable::builder().build();
+            let table = ColTable::builder().build();
             assert_eq!(table.nrows(), 0);
             assert_eq!(table.ncols(), 0);
             assert!(table.is_empty());
+        }
+
+        #[test]
+        fn rowlocview() {
+            let table = create_test_table();
+            assert_eq!(table.row(0).unwrap().get::<i32>(0).unwrap(), &0);
+
+            let s = "Hello".to_string();
+            for row in &table {
+                let some_string: &String = row.get(2).unwrap();
+                assert_eq!(some_string, &s);
+            }
         }
 
         #[test]
