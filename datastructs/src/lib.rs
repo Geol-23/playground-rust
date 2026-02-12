@@ -16,12 +16,12 @@ mod tests {
         };
 
         fn create_test_table() -> ColTable {
-            let nrows: usize = 1_000;
+            let nrows: usize = 100;
 
             ColTable::builder()
                 .column("A", vec![0i32; nrows])
-                .column("B", vec![0u8; nrows])
-                .column("C", vec!["Hello".to_string(); nrows])
+                .column("Col B", vec![0u8; nrows])
+                .column("Column C", vec!["Hello".to_string(); nrows])
                 .build()
         }
 
@@ -52,7 +52,9 @@ mod tests {
 
         #[test]
         fn temp() {
-            // println!("{}", std::mem::size_of::<String>());
+            let table = create_test_table();
+            println!("{}", table);
+            assert!(false)
         }
     }
 }
