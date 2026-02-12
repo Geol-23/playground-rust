@@ -1,22 +1,19 @@
+use std::any::TypeId;
 use std::clone::Clone;
 
 
 pub trait Table {
-    type TypeId;
-
     fn nrows(&self) -> usize;
     fn ncols(&self) -> usize;
     fn size(&self) -> (usize, usize) { (self.nrows(), self.ncols()) }
     fn is_empty(&self) -> bool { self.size() == (0, 0) }
-    fn schema(&self) -> &dyn Schema<TypeId = Self::TypeId>;
+    fn schema(&self) -> &dyn Schema;
 }
 
 pub trait Schema {
-    type TypeId;
-
     fn nfields(&self) -> usize;
     fn field_name(&self, index: usize) -> &str;
-    fn field_type(&self, index: usize) -> Self::TypeId;
+    fn field_type(&self, index: usize) -> TypeId;
 }
 
 pub trait TableMut: Table { }
