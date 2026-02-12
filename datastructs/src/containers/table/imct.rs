@@ -1,5 +1,6 @@
 use std::any::{ Any, TypeId };
-use std::fmt::Debug;
+use std::collections::HashMap;
+use std::fmt;
 use std::iter::{ ExactSizeIterator, FusedIterator };
 
 use super::traits::{ Table, Schema };
@@ -28,23 +29,29 @@ impl Schema for IMCTHeader {
 // *************************************************************************
 //                                  COLUMN
 // *************************************************************************
-trait Column: Debug {
+trait Column: fmt::Debug {
     fn len(&self) -> usize;
     fn type_id(&self) -> TypeId;
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn fmt_cell(&self, row: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result;
+    fn cell_to_string(&self, row: usize) -> String;
 }
 type DynColumn = Box<dyn Column>;
 
 #[derive(Debug)]
-pub struct IMCTColumn<T: Debug> {
+pub struct IMCTColumn<T: fmt::Debug> {
     data: Vec<T>,
 }
-impl<T: 'static + Debug> Column for IMCTColumn<T> {
+impl<T: 'static + fmt::Debug + fmt::Display> Column for IMCTColumn<T> {
     fn len(&self) -> usize { self.data.len() }
     fn type_id(&self) -> TypeId { TypeId::of::<T>() }
     fn as_any(&self) -> &dyn Any { self }
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
+    fn fmt_cell(&self, row: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.data[row])
+    }
+    fn cell_to_string(&self, row: usize) -> String { format!("{}", self.data[row]) }
 }
 
 
@@ -70,6 +77,57 @@ impl Table for InMemoryColumnTable {
     fn ncols(&self) -> usize { self.columns.len() }
     fn schema(&self) -> &dyn Schema { &self.header }
 }
+impl fmt::Display for InMemoryColumnTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ncols = self.ncols();
+        let nrows = self.nrows();
+
+        if ncols == 0 {
+            writln!(f, "<empty table>")
+        }
+
+        let mut col_widths = vec![0_usize; ncols];
+        for i in 0..ncols {
+            col_widths[i] = self.header.field_name(i).len();
+            for j in 0..nrows {
+                let len = self.columns[i].cell_to_string(j).len();
+                col_widths[i] = col_widths[i].max(len);
+            }
+        }
+
+        // Writing the header
+        for (i, (header, width)) in self.header.fields.iter().zip(&col_widths).enumerate() {
+            if i > 0 {
+                write!(f, "|")?;
+            }
+            write!(f, " {:width$} ", header.name, width = width)?;
+        }
+        writeln!(f)?;
+
+        // Writing the separator
+        for (i, width) in col_widths.iter().enumerate() {
+            if i > 0 {
+                write!(f, "|")?;
+            }
+            write!(f, " {:-<width$} ", "", width = width)?;
+        }
+        writeln!(f)?;
+
+        // Writing the data
+        for j in 0..nrows {
+            for i in 0..ncols {
+                if i > 0 {
+                    write!(f, "|")?;
+                }
+                let s = self.columns[i].cell_to_string(j);
+                write!(f, " {:pad$} ", s, pad=col_widths[i])?;
+            }
+            writeln!(f)?;
+        }
+
+        Ok(())
+    }
+}
 
 
 // *************************************************************************
@@ -80,7 +138,7 @@ pub struct IMCTRowView<'a> {
     index: usize,
 }
 impl<'a> IMCTRowView<'a> {
-    pub fn get<T: Debug + 'static>(&self, index: usize) -> Option<&'a T> {
+    pub fn get<T: fmt::Debug + 'static>(&self, index: usize) -> Option<&'a T> {
         let col = self.source
             .columns
             .get(index)?
@@ -160,7 +218,7 @@ pub struct IMCTBuilder {
     fields: Vec<Field>,
 }
 impl IMCTBuilder {
-    pub fn column<T: 'static + Debug>(mut self, name: impl Into<String>, data: Vec<T>) -> Self {
+    pub fn column<T: 'static + fmt::Debug + fmt::Display>(mut self, name: impl Into<String>, data: Vec<T>) -> Self {
         let type_id = TypeId::of::<T>();
         let name: String = name.into();
 
