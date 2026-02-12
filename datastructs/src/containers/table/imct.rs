@@ -5,7 +5,9 @@ use std::iter::{ ExactSizeIterator, FusedIterator };
 use super::traits::{ Table, Schema };
 use super::traits::loc::{ RowLocView };
 
-
+// *************************************************************************
+//                                  SCHEMA
+// *************************************************************************
 #[derive(Debug)]
 pub struct Field {
     name: String,
@@ -16,7 +18,6 @@ pub struct Field {
 pub struct IMCTHeader {
     fields: Vec<Field>,
 }
-
 impl Schema for IMCTHeader {
     fn nfields(&self) -> usize { self.fields.len() }
     fn field_name(&self, index: usize) -> &str { &self.fields[index].name }
@@ -24,6 +25,9 @@ impl Schema for IMCTHeader {
 }
 
 
+// *************************************************************************
+//                                  COLUMN
+// *************************************************************************
 trait Column: Debug {
     fn len(&self) -> usize;
     fn type_id(&self) -> TypeId;
@@ -36,7 +40,6 @@ type DynColumn = Box<dyn Column>;
 pub struct IMCTColumn<T: Debug> {
     data: Vec<T>,
 }
-
 impl<T: 'static + Debug> Column for IMCTColumn<T> {
     fn len(&self) -> usize { self.data.len() }
     fn type_id(&self) -> TypeId { TypeId::of::<T>() }
@@ -45,14 +48,15 @@ impl<T: 'static + Debug> Column for IMCTColumn<T> {
 }
 
 
-
+// *************************************************************************
+//                            InMemoryColumnTable
+// *************************************************************************
 #[derive(Debug)]
 pub struct InMemoryColumnTable {
     columns: Vec<DynColumn>,
     header: IMCTHeader,
 }
 pub type ColTable = InMemoryColumnTable;
-
 impl InMemoryColumnTable {
     pub fn builder() -> IMCTBuilder {
         IMCTBuilder {
@@ -61,8 +65,6 @@ impl InMemoryColumnTable {
         }
     }
 }
-
-
 impl Table for InMemoryColumnTable {
     fn nrows(&self) -> usize { self.columns.first().map_or(0, |c| c.len()) }
     fn ncols(&self) -> usize { self.columns.len() }
@@ -70,6 +72,9 @@ impl Table for InMemoryColumnTable {
 }
 
 
+// *************************************************************************
+//                                RowLocView
+// *************************************************************************
 pub struct IMCTRowView<'a> {
     source: &'a InMemoryColumnTable,
     index: usize,
@@ -85,6 +90,7 @@ impl<'a> IMCTRowView<'a> {
         col.data.get(self.index)
     }
 }
+
 
 pub struct IMCTRowViewIter<'a> {
     source: &'a InMemoryColumnTable,
@@ -146,11 +152,13 @@ impl RowLocView for InMemoryColumnTable {
 }
 
 
+// *************************************************************************
+//                       InMemoryColumnarTableBuilder
+// *************************************************************************
 pub struct IMCTBuilder {
     columns: Vec<DynColumn>,
     fields: Vec<Field>,
 }
-
 impl IMCTBuilder {
     pub fn column<T: 'static + Debug>(mut self, name: impl Into<String>, data: Vec<T>) -> Self {
         let type_id = TypeId::of::<T>();
