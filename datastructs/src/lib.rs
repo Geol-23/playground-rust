@@ -16,12 +16,20 @@ mod tests {
         };
 
         fn create_test_table() -> ColTable {
-            let nrows: usize = 100;
+            let nrows: usize = 10;
 
             ColTable::builder()
-                .column("A", vec![0i32; nrows])
-                .column("Col B", vec![0u8; nrows])
+                .column("A1", vec![usize::MAX; nrows])
+                .column("A2", vec![usize::MAX; nrows])
+                .column("A3", vec![usize::MAX; nrows])
+                .column("A4", vec![usize::MAX; nrows])
+                .column("A5", vec![usize::MAX; nrows])
+                .column("A6", vec![usize::MAX; nrows])
+                .column("A7", vec![usize::MAX; nrows])
+                .column("Col B", vec![u8::MAX; nrows])
                 .column("Column C", vec!["Hello".to_string(); nrows])
+                .column("Column D", vec!["Hello".to_string(); nrows])
+                .column("Column E", vec!["Hello".to_string(); nrows])
                 .build()
         }
 
@@ -40,8 +48,14 @@ mod tests {
 
         #[test]
         fn rowlocview() {
-            let table = create_test_table();
-            assert_eq!(table.row(0).unwrap().get::<i32>(0).unwrap(), &0);
+            let nrows: usize = 10;
+            let table = ColTable::builder()
+                .column("A", vec![i32::MAX; nrows])
+                .column("Col B", vec![u8::MAX; nrows])
+                .column("Column C", vec!["Hello".to_string(); nrows])
+                .build();
+
+            assert_eq!(table.row(0).unwrap().get::<i32>(0).unwrap(), &i32::MAX);
 
             let s = "Hello".to_string();
             for row in &table {
@@ -54,7 +68,6 @@ mod tests {
         fn temp() {
             let table = create_test_table();
             println!("{}", table);
-            assert!(false)
         }
     }
 }
