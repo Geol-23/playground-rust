@@ -79,9 +79,9 @@ impl Table for InMemoryColumnTable {
 }
 impl fmt::Display for InMemoryColumnTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let terminal_width = console::windows::get_terminal_size()
+        let terminal_width: usize = crossterm::terminal::size()
                     .map(|ts| ts.0)
-                    .unwrap_or(80);
+                    .unwrap_or(80).into();
         let renderer = IMCTTerminalRenderer { terminal_width };
         match renderer.layout(self) {
             Err(layout_err) => {
