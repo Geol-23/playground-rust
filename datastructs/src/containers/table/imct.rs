@@ -1,5 +1,4 @@
 use std::any::{ Any, TypeId };
-use std::collections::HashMap;
 use std::fmt;
 use std::iter::{ ExactSizeIterator, FusedIterator };
 use std::ops::{ Index, Range };
@@ -30,7 +29,7 @@ impl Schema for IMCTHeader {
 // *************************************************************************
 //                                  COLUMN
 // *************************************************************************
-trait Column: fmt::Debug {
+pub trait Column: fmt::Debug {
     fn len(&self) -> usize;
     fn type_id(&self) -> TypeId;
     fn as_any(&self) -> &dyn Any;
@@ -80,7 +79,10 @@ impl Table for InMemoryColumnTable {
 }
 impl fmt::Display for InMemoryColumnTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let renderer = IMCTTerminalRenderer { terminal_width: 100 };
+        let terminal_width = console::windows::get_terminal_size()
+                    .map(|ts| ts.0)
+                    .unwrap_or(80);
+        let renderer = IMCTTerminalRenderer { terminal_width };
         match renderer.layout(self) {
             Err(layout_err) => {
                 match layout_err {
@@ -157,7 +159,7 @@ impl IMCTTerminalRenderer {
                 }
                 write!(f, " {:width$} ", target[i], width=layout.raw_column_widths[i])?;
             }
-            write!(f, " ... ")?;
+            write!(f, "| ... ")?;
             for i in layout.rrange.clone() {
                 if i > 0 {
                     write!(f, "|")?;
@@ -171,7 +173,19 @@ impl IMCTTerminalRenderer {
             .header.fields.iter()
             .map(|f| { &f.name })
             .collect();
-        render_target_row(f, layout, header_names);
+        let pads: Vec<String> = layout
+            .raw_column_widths.iter()
+            .map(|l| "-".repeat(*l))
+            .collect();
+        render_target_row(f, layout, header_names)?;
+        render_target_row(f, layout, pads)?;
+        for j in 0..table.nrows() {
+            let mut row: Vec<String> = Vec::new();
+            for i in 0..table.ncols() {
+                row.push(table.columns[i].cell_to_string(j));
+            }
+            render_target_row(f, layout, row)?;
+        }
         Ok(())
     }
 
@@ -215,6 +229,41 @@ impl IMCTTerminalRenderer {
         Ok(())
     }
 }
+struct Splitter {
+    p: usize,
+    s: usize,
+    polarity: bool,
+    ncols: usize,
+}
+impl Splitter {
+    fn p(&self) -> usize { self.p }
+    fn s(&self) -> usize { self.ncols - self.s }
+    fn new(ncols: usize) -> Self {
+        let p = ncols / 2;
+        let s = ncols - p;
+        let polarity = s > p;
+        Self {
+            p,
+            s,
+            polarity,
+            ncols,
+        }
+    }
+}
+impl Iterator for Splitter {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.p + self.s == 0 { return None }
+        if self.polarity {
+            self.s -= 1;
+        } else {
+            self.p -= 1;
+        }
+        self.polarity = !self.polarity;
+        Some((self.p(), self.s()))
+    }
+}
 impl IMCTTableRenderer for IMCTTerminalRenderer {
     fn layout(&self, table: &InMemoryColumnTable) -> Result<IMCTTableLayout, IMCTTableLayoutError> {
         const ELLIPSIS_WIDTH: usize = 3;
@@ -235,10 +284,7 @@ impl IMCTTableRenderer for IMCTTerminalRenderer {
             }
         }
 
-        let mut p = ncols / 2;
-        let mut s = ncols - p;
         let mut total = 0;
-
         let mut p_widths: Vec<usize> = col_widths.iter()
             .map(|i| { total += i; total })
             .collect();
@@ -246,30 +292,33 @@ impl IMCTTableRenderer for IMCTTerminalRenderer {
         let total_raw = p_widths[ncols];
         let rendered_column_width = |p_widths: &[usize], p: usize, s: usize, ellipsis: bool| {
             let el: usize = ellipsis as usize;
-            p_widths[p] + total_raw - p_widths[ncols - s] + ELLIPSIS_WIDTH * el + (p + s + el) * 3 - 1
+            p_widths[p] + total_raw - p_widths[s] + ELLIPSIS_WIDTH * el + (p + s + el) * 3 - 1
         };
+        let splitter = Splitter::new(ncols);
+        // println!("p: {}, s: {}", splitter.p(), splitter.s());
+        // println!("pwidths: {:?}", p_widths);
+        // println!("Rendered width: {}", rendered_column_width(&p_widths, splitter.p(), splitter.s(), false));
+        // println!("Rendered width (ellipse): {}", rendered_column_width(&p_widths, splitter.p(), splitter.s(), true));
+        // println!("Terminal width: {}", self.terminal_width);
+        // println!("prefix indicies: {:?}, suffix indicies: {:?}", 0..splitter.p()+1, splitter.s()..ncols);
 
-        if rendered_column_width(&p_widths, p, s, false) <= self.terminal_width {
-            return Ok(IMCTTableLayout::new(0..p, s..ncols, col_widths, false))
+
+        if rendered_column_width(&p_widths, splitter.p(), splitter.s(), false) <= self.terminal_width {
+            return Ok(IMCTTableLayout::new(0..splitter.p()+1, splitter.s()+1..ncols, col_widths, false))
         }
 
-        loop {
-            if (p, s) == (0, 0) {
+        // println!("p: {}, s: {}", splitter.p(), splitter.s());
+        for (p, s) in splitter {
+            // println!("p: {}, s: {}", p, s);
+            // println!("Rendered width: {}", rendered_column_width(&p_widths, p, s, true));
+            if (p, s) == (0, ncols) {
                 return Err(IMCTTableLayoutError::OversizedColumn)
             }
             if rendered_column_width(&p_widths, p, s, true) <= self.terminal_width {
-                return Ok(IMCTTableLayout::new(0..p, s..ncols, col_widths, true))
+                return Ok(IMCTTableLayout::new(0..p+1, s+1..ncols, col_widths, true))
             }
-            s -= 1;
-            if (p, s) == (0, 0) {
-                return Err(IMCTTableLayoutError::OversizedColumn)
-            }
-            if rendered_column_width(&p_widths, p, s, true) <= self.terminal_width {
-                return Ok(IMCTTableLayout::new(0..p, s..ncols, col_widths, true))
-            }
-            p -= 1;
         }
-        Err(IMCTTableLayoutError::OversizedColumn)
+        return Err(IMCTTableLayoutError::OversizedColumn)
     }
     fn render(&self,
         table: &InMemoryColumnTable,
