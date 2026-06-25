@@ -1,3 +1,5 @@
+// Internal
 pub mod table;
+pub mod ohashmap;
 
-pub struct SuperVec {}
+use ohashmap::OrderedHashMap;
