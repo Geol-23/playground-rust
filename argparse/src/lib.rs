@@ -15,22 +15,16 @@ mod error;
 
 pub use action::{
     ArgumentAction,
-    StoreAction,
-    StoreConstAction,
-    StoreTrueAction,
-    StoreFalseAction,
-    AppendAction,
-    AppendConstAction,
-    ExtendAction,
-    CountAction,
 };
 use arg_table::ArgumentTable;
 pub use argument::{
     ArgumentNumber,
+    _BuildsArgument,
 };
 use argument::{
     ArgumentBuilder,
-    PositionalOrOptional,
+    Argument,
+    ArgumentRef,
     PositionalArgument,
     OptionalArgument,
 };
@@ -38,110 +32,60 @@ pub use error::ArgParseError;
 
 
 
-pub struct ArgumentParser {
-    command: HashMap<String, ArgumentParser>,
-    positional: Vec<(String, PositionalOrOptional)>,
-    optional: Vec<(String, PositionalOrOptional)>,
-    optional_lookup: HashMap<String, usize>,
-    help: String,
-}
 
-struct Uninitialised;
-struct Initialised;
-struct ParserState<'a, S=Uninitialised> {
-    arg: &'a PositionalOrOptional,
-    arg_name: &'a String,
+struct ParserState<'a> {
+    arg: ArgumentRef<'a>,
+    arg_name: &'a str,
     argc: usize,
     pos_idx: usize,
-    _marker: PhantomData<S>,
+    values: Vec<&'a str>,
 }
-
 impl<'a> ParserState<'a> {
-    fn initialise<'b>(arg: &'b str, parser: &'a ArgumentParser) -> ParserState<'a, Initialised> {
+    fn new<'b>(arg: &'b str, parser: &'a ArgumentParser) -> Self {
         match parser.optional_lookup.get(arg) {
             Some(v) => {
                 let (arg_name, arg) = &parser.optional[*v];
-                ParserState::<Initialised> {
-                   arg,
-                   arg_name,
-                   argc: 0,
-                   pos_idx: 0,
-                   _marker: PhantomData::<_>,
-               }
+                ParserState { arg: arg.into(), arg_name, argc: 0, pos_idx: 0, values: Vec::new() }
             },
             None => {
                 let (arg_name, arg) = &parser.positional[0];
-                ParserState::<Initialised> {
-                   arg,
-                   arg_name,
-                   argc: 0,
-                   pos_idx: 1,
-                   _marker: PhantomData::<_>,
-               }
+                ParserState { arg: arg.into(), arg_name, argc: 0, pos_idx: 1, values: Vec::new() }
             },
         }
     }
-}
-
-impl <'a> ParserState<'a, Initialised> {
-    fn get_nargs(self: &Self) -> ArgumentNumber {
-        match self.arg {
-            PositionalOrOptional::Positional(arg) => { arg.nargs },
-            PositionalOrOptional::Optional(arg) => { arg.nargs },
-        }
+    fn push_value(&mut self, value: &'a str) {
+        self.values.push(value);
+        self.argc += 1;
     }
-    fn set_optional(self: &mut Self, parser: &'a ArgumentParser, i: usize) -> Result<(), ()> {
-        // check if the current arg is finished
-        match self.get_nargs() {
-            ArgumentNumber::N(i) => { if self.argc != i { return Err(()); } },
-            ArgumentNumber::NOrLess(i) => { if self.argc > i { return Err(()); } },
-            ArgumentNumber::NOrMore(i) => { if self.argc < i { return Err(()); } },
-        };
-
-        // set the optional arg
-        let (arg_name, op_arg) = &parser.optional[i];
-        self.arg = op_arg;
+    fn flush(&mut self, table: &mut ArgumentTable) {
+        self.arg.core().action.act(table, self.arg_name, self.arg, &self.values);
+        self.values.clear();
+    }
+    fn switch(&mut self, table: &mut ArgumentTable, arg_name: &'a str, arg: ArgumentRef<'a>) {
+        self.flush(table);
+        self.arg = arg;
         self.arg_name = arg_name;
         self.argc = 0;
-        Ok(())
     }
-    fn inc_or_positional<F: Fn(usize) -> bool>(self: &mut Self, parser: &'a ArgumentParser, predicate: F) -> Result<(), ()> {
-        if predicate(self.argc) {
-            match parser.positional.get(self.pos_idx) {
-                Some((arg_name, new_arg)) => {
-                    self.pos_idx += 1;
-                    self.arg = new_arg;
-                    self.argc = 0;
-                    Ok(())
-                },
-                None => { Err(()) },
-            }
-        } else {
-            self.argc += 1;
-            Ok(())
-        }
-    }
-    fn update<'b>(self: &mut Self, inp_arg: &'b str, parser: &'a ArgumentParser) -> Result<(), ArgParseError> {
+    fn update(&mut self, table: &mut ArgumentTable, token: &'a str, parser: &'a ArgumentParser) -> Result<(), ArgParseError> {
         use ArgParseError as ArgE;
-
-        match parser.optional_lookup.get(inp_arg) {
-            Some(i) => { self.set_optional(parser, *i).map_err(|_| ArgE::UnexpectedOptional(inp_arg.to_string())) },
-            None => {
-                match self.get_nargs() {
-                    ArgumentNumber::N(i) => {
-                        self.inc_or_positional(parser, |count| count == i)
-                            .map_err(|_| ArgE::UnexpectedPositional(inp_arg.to_string()))
-                    },
-                    ArgumentNumber::NOrLess(i) => {
-                        self.inc_or_positional(parser, |count| count >= 1)
-                            .map_err(|_| ArgE::UnexpectedPositional(inp_arg.to_string()))
-                    },
-                    ArgumentNumber::NOrMore(i) => {
-                        self.inc_or_positional(parser, |_| false)
-                            .map_err(|_| ArgE::UnexpectedPositional(inp_arg.to_string()))
-                    },
-                }
-            },
+        if let Some(&i) = parser.optional_lookup.get(token) { // Is a flag
+            if !self.arg.core().nargs.is_finished(self.argc) { // Is finished
+                return Err(ArgE::UnexpectedOptional(token.to_string()));
+            }
+            let (name, arg) = &parser.optional[i];
+            self.switch(table, name, arg.into());
+            Ok(())
+        } else if self.arg.core().nargs.is_finished(self.argc) {
+            let (name, arg) = parser.positional.get(self.pos_idx)
+                .ok_or_else(|| ArgE::UnexpectedPositional(token.to_string()))?;
+            self.pos_idx += 1;
+            self.switch(table, name, arg.into());
+            self.push_value(token);
+            Ok(())
+        } else {
+            self.push_value(token);
+            Ok(())
         }
     }
 }
@@ -158,6 +102,15 @@ where
 {
     !s.as_ref().starts_with("--") && s.as_ref().starts_with("-")
 }
+
+
+pub struct ArgumentParser {
+    command: HashMap<String, ArgumentParser>,
+    positional: Vec<(String, PositionalArgument)>,
+    optional: Vec<(String, OptionalArgument)>,
+    optional_lookup: HashMap<String, usize>,
+    help: String,
+}
 impl ArgumentParser {
     pub fn builder() -> ArgumentParserBuilder {
         ArgumentParserBuilder::new()
@@ -168,30 +121,31 @@ impl ArgumentParser {
         S: AsRef<str>
     {
         use ArgParseError as ArgE;
+        let mut _arguments: Vec::<String> = Vec::new();
+        for s in arguments {
+            if is_single_flag(s) {
+                for c in s.as_ref().strip_prefix('-') {
+                    _arguments.push(format!("-{c}"))
+                }
+                continue;
+            }
+            _arguments.push(s.as_ref().to_string())
+        }
+        let mut arg_iter = _arguments.iter();
 
-        let mut arg_iter = arguments.iter()
-            .flat_map(|s| -> Box<dyn Iterator<Item = String>> {
-                    if let Some(rest) = s.as_ref().strip_prefix('-') {
-                        Box::new(rest.chars().map(|c| format!("-{c}")))
-                    } else {
-                        Box::new(std::iter::once(s.as_ref().to_string()))
-                    }
-                });
-
-
-        let mut root_table = ArgumentTable::new(
-            &arg_iter
-                .next()
-                .ok_or(ArgE::ExpectedCommand(
-                    vec![env::args().next().unwrap()]
-                ))?
-        );
+        let mut root_table = if let Some(arg) = arg_iter.next() {
+            ArgumentTable::new(arg)
+        } else {
+            return Err(ArgE::ExpectedCommand(
+                vec![env::args().next().unwrap()] // Fetches the name of the program
+            ));
+        };
         let mut base_parser = self;
         let mut base_table = &mut root_table;
 
         for (i, item) in arg_iter.by_ref().enumerate() {
-            if base_parser.command.contains_key(&item) {
-                base_parser = base_parser.command.get(&item).unwrap();
+            if base_parser.command.contains_key(item) {
+                base_parser = base_parser.command.get(item).unwrap();
                 base_table.cmd = Some(Box::new(ArgumentTable::new(&item)));
                 base_table = base_table.cmd.as_mut().unwrap();
             } else {
@@ -201,11 +155,13 @@ impl ArgumentParser {
 
         let mut state = match arg_iter.next() {
             Some(argv) => {
-                ParserState::initialise(argv.as_ref(), base_parser)
+                ParserState::new(argv.as_ref(), base_parser)
             },
             None => { // No parameters for command
                 if let Some((_, arg)) = base_parser.positional.first() {
-                    return Err(ArgE::ExpectedPositional(base_parser.positional[0].1.as_pos().clone()));
+                    return Err(ArgE::ExpectedPositional(
+                        base_parser.positional[0].1.name.clone()
+                    ));
                 }
                 if !base_parser.command.is_empty() {
                     return Err(ArgE::ExpectedCommand(
@@ -215,10 +171,10 @@ impl ArgumentParser {
                             .collect()
                     ))
                 }
-                if base_parser.optional.iter().any(|(name, arg)| {arg.as_op().required}) {
+                if base_parser.optional.iter().any(|(name, arg)| {arg.required}) {
                     return Err(ArgE::RequiresFlags(base_parser.optional
                         .iter()
-                        .filter_map(|(name, arg)| arg.as_op().required.then(|| arg.as_op().clone()))
+                        .filter_map(|(name, arg)| arg.required.then(|| arg.flags.clone()))
                         .collect()
                     ));
                 }
@@ -226,18 +182,12 @@ impl ArgumentParser {
             },
         };
 
-
-        let mut group: Vec<&str> = Vec::new();
-        for item in arg_iter {
+        for token in arg_iter {
             // Update the state
-            if !item.is_ascii() { return Err(ArgE::NonASCIIInput(item.to_string())); }
-            state.update(&item, base_parser)?;
-            if is_flag(item) { continue; }
-
-            // If arg has choices, check against and append
-
-
+            if !token.is_ascii() { return Err(ArgE::NonASCIIInput(token.to_string())); }
+            state.update(base_table, &token, base_parser)?;
         }
+        state.flush(base_table);
 
         Ok(root_table)
     }
@@ -247,8 +197,8 @@ impl ArgumentParser {
 
 pub struct ArgumentParserBuilder {
     command_table: HashMap<String, ArgumentParser>,
-    positional: Vec<(String, PositionalOrOptional)>,
-    optional: HashMap<String, PositionalOrOptional>,
+    positional: Vec<(String, PositionalArgument)>,
+    optional: HashMap<String, OptionalArgument>,
     help: String,
 }
 
@@ -263,10 +213,10 @@ impl ArgumentParserBuilder {
     }
     pub fn build(mut self: Self) -> ArgumentParser {
         let mut optional_lookup = HashMap::<String, usize>::new();
-        let mut optional = Vec::<(String, PositionalOrOptional)>::new();
+        let mut optional = Vec::<(String, OptionalArgument)>::new();
 
         for (i, e) in self.optional.drain().enumerate() {
-            for argname in &e.1.as_op().flags {
+            for argname in &e.1.flags {
                 optional_lookup.insert(argname.clone(), i);
             }
             optional.push(e);
@@ -289,17 +239,16 @@ impl ArgumentParserBuilder {
 
         self
     }
-    pub fn arg<F: FnOnce(ArgumentBuilder) -> ArgumentBuilder>(mut self: Self, dest: impl Into<String>, argument: F) -> Self {
+    pub fn arg<T: _BuildsArgument, F: FnOnce(ArgumentBuilder) -> T>(mut self: Self, dest: impl Into<String>, argument: F) -> Self {
         let dest = dest.into();
         if self.positional.iter().find(|(n, _)| n == &dest).is_some() || self.optional.contains_key(&dest)  { panic!("Duplicate argument dest: '{}'", dest); }
 
-        let mut arg_builder = ArgumentBuilder::new().name(dest.clone());
-        arg_builder = argument(arg_builder);
-        let argument = arg_builder.build();
+        let mut arg_builder = ArgumentBuilder::new(&dest);
+        let argument = argument(arg_builder).build();
 
         match argument {
-            PositionalOrOptional::Positional(_) => { self.positional.push((dest, argument)); },
-            PositionalOrOptional::Optional(_) => { self.optional.insert(dest, argument); },
+            Argument::Positional(arg) => { self.positional.push((dest, arg)); },
+            Argument::Optional(arg) => { self.optional.insert(dest, arg); },
         };
 
         self

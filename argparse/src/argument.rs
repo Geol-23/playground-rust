@@ -1,52 +1,63 @@
 // Standard imports
 use std::collections::HashSet;
 use std::fmt;
+use std::marker::PhantomData;
 
 // Internal imports
 use super::action::{
     ArgumentAction,
-    StoreAction,
 };
 
-pub enum PositionalOrOptional {
+pub enum Argument {
     Positional(PositionalArgument),
     Optional(OptionalArgument),
 }
-impl PositionalOrOptional {
+impl Argument {
     pub fn core(self: &Self) -> &ArgumentCore {
         match self {
-            PositionalOrOptional::Positional(pos) => pos.core,
-            PositionalOrOptional::Optional(opt) => opt.core,
+            Argument::Positional(pos) => &pos.core,
+            Argument::Optional(opt) => &opt.core,
         }
     }
     pub fn label(self: &Self) -> String {
         match self {
-            PositionalOrOptional::Positional(pos) => pos.name.clone(),
-            PositionalOrOptional::Optional(opt) => opt.flags.join(", "),
+            Argument::Positional(pos) => pos.name.clone(),
+            Argument::Optional(opt) => opt.flags.join(", "),
         }
     }
-    pub fn as_pos(self: &Self) -> &PositionalArgument {
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ArgumentRef<'a> {
+    Positional(&'a PositionalArgument),
+    Optional(&'a OptionalArgument),
+}
+impl<'a> ArgumentRef<'a> {
+    pub fn core(self: &Self) -> &'a ArgumentCore {
         match self {
-            PositionalOrOptional::Positional(a) => a,
-            PositionalOrOptional::Optional(_) => panic!("attempted to create positional from optional")
+            ArgumentRef::Positional(pos) => &pos.core,
+            ArgumentRef::Optional(opt) => &opt.core,
         }
     }
-    fn to_pos(self: Self) -> PositionalArgument {
+    pub fn label(self: &Self) -> String {
         match self {
-            PositionalOrOptional::Positional(a) => a,
-            PositionalOrOptional::Optional(_) => panic!("attempted to create positional from optional")
+            ArgumentRef::Positional(pos) => pos.name.clone(),
+            ArgumentRef::Optional(opt) => opt.flags.join(", "),
         }
     }
-    pub fn as_op(self: &Self) -> &OptionalArgument {
-        match self {
-            PositionalOrOptional::Optional(a) => a,
-            PositionalOrOptional::Positional(_) => panic!("attempted to create optional from positional")
-        }
-    }
-    fn to_op(self: Self) -> OptionalArgument{
-        match self {
-            PositionalOrOptional::Optional(a) => a,
-            PositionalOrOptional::Positional(_) => panic!("attempted to create optional from positional")
+}
+
+impl<'a> From<&'a PositionalArgument> for ArgumentRef<'a> {
+    fn from(p: &'a PositionalArgument) -> Self { ArgumentRef::Positional(p) }
+}
+impl<'a> From<&'a OptionalArgument> for ArgumentRef<'a> {
+    fn from(o: &'a OptionalArgument) -> Self { ArgumentRef::Optional(o) }
+}
+impl<'a> From<&'a Argument> for ArgumentRef<'a> {
+    fn from(arg: &'a Argument) -> Self {
+        match arg {
+            Argument::Positional(a) => ArgumentRef::Positional(a),
+            Argument::Optional(a) => ArgumentRef::Optional(a),
         }
     }
 }
@@ -73,34 +84,37 @@ impl<T: Into<String>> IntoVecString for Vec<T> {
     }
 }
 
+pub trait _BuildsArgument {
+    fn build(self: Self) -> Argument;
+}
 
-struct StatePositional;
-struct StateOptional;
+pub struct StatePositional;
+pub struct StateOptional;
 #[derive(Debug)]
 pub struct ArgumentBuilder<S=StatePositional> {
     argument: AbstractArgument,
     _marker: PhantomData<S>,
 }
 impl ArgumentBuilder {
-    fn new(dest: &str) -> Self<StatePositional> {
-        Self::<_> {
-            argument: AbstractArgument::new_positional(dest),
+    pub fn new(dest: &str) -> ArgumentBuilder<StatePositional> {
+        ArgumentBuilder::<_> {
+            argument: AbstractArgument::new(dest),
             _marker: PhantomData::<_>,
         }
     }
 }
 impl<S> ArgumentBuilder<S> {
-    fn transition<NewState>(self) -> Self<NewState> {
-        Self {
+    fn transition<NewState>(self) -> ArgumentBuilder<NewState> {
+        ArgumentBuilder::<_> {
             argument: self.argument,
             _marker: PhantomData,
         }
     }
-    pub fn name(mut self: Self, name: impl Into<String>) -> Self<StatePositional> {
+    pub fn name(mut self: Self, name: impl Into<String>) -> ArgumentBuilder<StatePositional> {
         self.argument.argname = ArgumentIdentifier::Name(name.into());
         self.transition::<StatePositional>()
     }
-    pub fn flags(mut self: Self, flags: impl IntoVecString) -> Self<StateOptional> {
+    pub fn flags(mut self: Self, flags: impl IntoVecString) -> ArgumentBuilder<StateOptional> {
         let mut flags = flags.into();
         for flag in &flags {
             if !flag.starts_with("-") { panic!("Flag must start with '-'"); }
@@ -109,8 +123,8 @@ impl<S> ArgumentBuilder<S> {
         }
 
         match &mut self.argument.argname {
-            Some(ArgumentIdentifier::Flag(vec)) => vec.append(&mut flags),
-            Some(ArgumentIdentifier::Name(_)) | None => self.argument.argname = Some(ArgumentIdentifier::Flag(flags)),
+            ArgumentIdentifier::Flag(vec) => vec.append(&mut flags),
+            ArgumentIdentifier::Name(_) => { self.argument.argname = ArgumentIdentifier::Flag(flags); },
         }
 
         self.argument.required = false;
@@ -134,7 +148,7 @@ impl<S> ArgumentBuilder<S> {
             if choice.starts_with("-") { panic!("Choice cannot start with '-'"); }
             if !choice.is_ascii() { panic!("Choice must only contain ascii characters"); }
         }
-        self.argument.core.choices = choices;
+        self.argument.core.choices = Some(choices.into_iter().collect());
         self
     }
     pub fn help(mut self: Self, help: impl Into<String>) -> Self {
@@ -142,17 +156,24 @@ impl<S> ArgumentBuilder<S> {
         self
     }
 }
-impl ArgumentBuilder<StatePositional> {
-    pub fn build(self: Self) -> PositionalOrOptional {
-        PositionalOrOptional::Positional(
-            self.into_positional()
+impl _BuildsArgument for ArgumentBuilder<StatePositional> {
+    fn build(self: Self) -> Argument {
+        Argument::Positional(
+            self.argument.into_positional()
+        )
+    }
+}
+impl _BuildsArgument for ArgumentBuilder<StateOptional> {
+    fn build(self: Self) -> Argument {
+        Argument::Optional(
+            self.argument.into_optional()
         )
     }
 }
 impl ArgumentBuilder<StateOptional> {
-    pub fn build(self: Self) -> PositionalOrOptional {
-        PositionalOrOptional::Optional(
-            self.into_optional()
+    pub fn build(self: Self) -> Argument {
+        Argument::Optional(
+            self.argument.into_optional()
         )
     }
     pub fn default(mut self: Self, default: impl IntoVecString) -> Self {
@@ -195,9 +216,25 @@ impl fmt::Display for ArgumentNumber {
         }
     }
 }
+impl ArgumentNumber {
+    pub fn is_valid(self: &Self, count: usize) -> bool {
+        match self {
+            ArgumentNumber::N(i) => count == *i,
+            ArgumentNumber::NOrLess(i) => count <= *i,
+            ArgumentNumber::NOrMore(i) => count >= *i,
+        }
+    }
+    pub fn is_finished(self: &Self, count: usize) -> bool {
+        match self {
+            ArgumentNumber::N(i) => count == *i,
+            ArgumentNumber::NOrLess(i) => count <= *i,
+            ArgumentNumber::NOrMore(i) => count >= *i,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
-struct ArgumentCore {
+pub struct ArgumentCore {
     pub action: ArgumentAction,
     pub nargs: ArgumentNumber,
     pub constant: Option<Vec<String>>,
@@ -227,7 +264,7 @@ struct AbstractArgument {
     core: ArgumentCore,
 }
 impl AbstractArgument {
-    fn new_positional(name: &str) -> {
+    fn new(name: &str) -> AbstractArgument {
         AbstractArgument {
             argname: ArgumentIdentifier::Name(name.to_string()),
             default: None,
@@ -242,8 +279,9 @@ impl AbstractArgument {
         }
     }
     fn into_positional(self: Self) -> PositionalArgument {
-        let ArgumentIdentifer::Name(name) = self.argname.expect("argument identifier not set") {
-            panic!("argument identifier not a name");
+        let name = match self.argname {
+            ArgumentIdentifier::Name(n) => n,
+            ArgumentIdentifier::Flag(_) => { panic!("argument identifier not a name"); }
         };
         let core = self.core;
         PositionalArgument {
@@ -253,8 +291,9 @@ impl AbstractArgument {
     }
 
     fn into_optional(self: Self) -> OptionalArgument {
-        let ArgumentIdentifer::Flags(flags) = self.argname.expect("argument identifier not set") {
-            panic!("argument identifier not a flag(s)");
+        let flags = match self.argname {
+            ArgumentIdentifier::Name(_) => { panic!("argument identifier not a flag(s)"); },
+            ArgumentIdentifier::Flag(f) => f,
         };
         OptionalArgument {
             flags,

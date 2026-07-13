@@ -33,10 +33,10 @@ impl fmt::Display for ArgParseError {
             ArgParseError::ExpectedPositional(arg_name) => write!(f, "missing positional argument {}", arg_name),
             ArgParseError::ExpectedArguments(flags, nargs) => write!(f, "argument(s) {}: expected {}", format!("[{}]", flags.join(", ")), nargs),
             ArgParseError::ExpectedCommand(cmds) => write!(f, "command name is required: {{{}}}", cmds.join(", ")),
-            ArgParseError::RequiresFlags(flags) => write!(f, "the following flags are required: {{{}}}",
-                flags
+            ArgParseError::RequiresFlags(flag_groups) => write!(f, "the following flags are required: {{{}}}",
+                flag_groups
                     .iter()
-                    .map(|flag| format!("[{}]", flags.join(", ")))
+                    .map(|flags| format!("[{}]", flags.join(", ")))
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
