@@ -103,7 +103,7 @@ where
     !s.as_ref().starts_with("--") && s.as_ref().starts_with("-")
 }
 
-
+#[derive(Debug)]
 pub struct ArgumentParser {
     command: HashMap<String, ArgumentParser>,
     positional: Vec<(String, PositionalArgument)>,
@@ -115,7 +115,9 @@ impl ArgumentParser {
     pub fn builder() -> ArgumentParserBuilder {
         ArgumentParserBuilder::new()
     }
-    pub fn parse(self: &Self) -> Result<ArgumentTable, ArgParseError> { self.parse_from(&env::args().collect::<Vec<_>>()) }
+    pub fn parse(self: &Self) -> Result<ArgumentTable, ArgParseError> {
+        self.parse_from(&env::args().skip(1).collect::<Vec<_>>())
+    }
     pub fn parse_from<S>(self: &Self, arguments: &[S]) -> Result<ArgumentTable, ArgParseError>
     where
         S: AsRef<str>
@@ -142,6 +144,10 @@ impl ArgumentParser {
         };
         let mut base_parser = self;
         let mut base_table = &mut root_table;
+
+        dbg!(&_arguments);
+        dbg!(&base_table);
+        dbg!(&base_parser);
 
         for (i, item) in arg_iter.by_ref().enumerate() {
             if base_parser.command.contains_key(item) {
@@ -222,6 +228,7 @@ impl ArgumentParserBuilder {
             optional.push(e);
         }
 
+
         ArgumentParser {
             positional: self.positional,
             optional,
@@ -247,8 +254,8 @@ impl ArgumentParserBuilder {
         let argument = argument(arg_builder).build();
 
         match argument {
-            Argument::Positional(arg) => { self.positional.push((dest, arg)); },
-            Argument::Optional(arg) => { self.optional.insert(dest, arg); },
+            Argument::Positional(arg) => { (&mut self.positional).push((dest, arg)); },
+            Argument::Optional(arg) => { (&mut self.optional).insert(dest, arg); },
         };
 
         self

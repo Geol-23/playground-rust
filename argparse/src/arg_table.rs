@@ -15,6 +15,7 @@ impl fmt::Display for ArgDecodeError {
 impl std::error::Error for ArgDecodeError {}
 
 type ArgumentGroup = Vec<String>;
+#[derive(Debug)]
 pub struct ArgumentTable {
     pub name: String,
     pub cmd: Option<Box<ArgumentTable>>,
