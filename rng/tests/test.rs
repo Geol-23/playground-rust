@@ -5,60 +5,68 @@
  * Poor dimensional distribution of the output sequence;
  * Distances between where certain values occur are distributed differently from those in a random sequence distribution.
  */
+use rng::generators;
+use rng::testlib::{Bound, RNGBiasTest, RNGPeriodTest, SeedGen, StatBenchmark};
 
-use std::cmp::Ord;
+const CYCLE_LINEAR_N_SEEDS: u64 = 10_000;
+const MAX_CYCLES: u32 = 500;
+const BIAS_LINEAR_N_SEEDS: u64 = 1_000;
+const BIAS_SAMPLES: u64 = 10_000;
 
-use rng::core::Seed;
+macro_rules! create_test {
+    ( $( $name:ident: $type:ty $(,)? ),+ ) => {$(
+        mod $name {
+            use super::{
+                BENCH_LAM,
+                BENCH_MU,
+                MAX_CYCLES,
+                CYCLE_LINEAR_N_SEEDS,
+                BIAS_LINEAR_N_SEEDS,
+                BIAS_SAMPLES,
+                RNGBiasTest,
+                RNGPeriodTest,
+                SeedGen,
+                $type
+            };
 
-#[derive(Clone, Copy, Debug)]
-struct Stats {
-    mean: f64,
-    std: f64,
-    min: f64,
-    max: f64,
-}
-impl Stats {
-    fn empty() -> Self {
-        Self {
-            mean: 0.0,
-            std: 0.0,
-            min: 0.0,
-            max: 0.0,
+            #[test]
+            fn cycle_linear_seed() {
+                let sampler = SeedGen::Sampler::new(CYCLE_LINEAR_N_SEEDS, 0, u64::MAX);
+                let result =
+                    <$type>::benchmark_period(sampler.apply(SeedGen::Linear::UNIT), MAX_CYCLES);
+                result.bench(stringify!($type), BENCH_MU, BENCH_LAM);
+            }
+
+            #[test]
+            fn bias_linear_seed() {
+                let sampler = SeedGen::Sampler::new(BIAS_LINEAR_N_SEEDS, 0, u64::MAX);
+                let result =
+                    <$type>::benchmark_bias(sampler.apply(SeedGen::Linear::UNIT), BIAS_SAMPLES);
+                panic!("{:#?}", result)
+            }
         }
-    }
-}
-impl<T> From<&[T]> for Stats
-where
-    T: Copy + Ord,
-    f64: From<T>,
-{
-    fn from(value: &[T]) -> Self {
-        if value.len() == 0 {
-            return Stats::empty();
-        }
-
-        let n = value.len() as f64;
-        let min: f64 = From::from(*(value.iter().min().unwrap()));
-        let max: f64 = From::from(*(value.iter().max().unwrap()));
-        let mean: f64 = value.iter().map(|&x| f64::from(x)).sum::<f64>() / n;
-        let variance: f64 = value
-            .iter()
-            .map(|&x| (f64::from(x) - mean).powi(2))
-            .sum::<f64>()
-            / n;
-
-        Self {
-            mean,
-            min,
-            max,
-            std: variance.sqrt(),
-        }
-    }
+    )*};
 }
 
-fn resolve_seed_period<S>(seeds: S, gen_limit: usize) -> Stats
-where
-    S: Iterator<Item = Seed>,
-{
-    todo!()
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use generators::*;
+
+    const BENCH_MU: StatBenchmark = StatBenchmark {
+        mean: Some(Bound::GE((MAX_CYCLES / 100 * 95) as f64)),
+        std: Some(Bound::LE(1000 as f64)),
+        min: Some(Bound::GE((MAX_CYCLES / 100 * 90) as f64)),
+        max: None,
+    };
+    const BENCH_LAM: StatBenchmark = StatBenchmark {
+        mean: Some(Bound::GE((MAX_CYCLES / 100 * 95) as f64)),
+        std: Some(Bound::LE(1000 as f64)),
+        min: Some(Bound::GE((MAX_CYCLES / 100 * 90) as f64)),
+        max: None,
+    };
+
+    create_test!(
+        test_middle_square: MiddleSquare,
+    );
 }
