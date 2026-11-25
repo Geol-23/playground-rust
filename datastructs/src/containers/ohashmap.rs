@@ -364,6 +364,20 @@ where
     }
 }
 
+impl<K, V, S> FromIterator<(K, V)> for OrderedHashMap<K, V, S>
+where
+    S: Default + BuildHasher,
+    K: Hash + Eq,
+{
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        let mut out: OrderedHashMap<K, V, S> = OrderedHashMap::with_hasher(S::default());
+        for (k, v) in iter.into_iter() {
+            out.insert(k, v);
+        }
+        out
+    }
+}
+
 impl<K, V, S> Default for OrderedHashMap<K, V, S>
 where
     S: Default + BuildHasher,
@@ -561,6 +575,7 @@ where
     }
 }
 
+// Unit Testing -----------------------------------------------------------------------------------
 #[cfg(test)]
 mod ohm_tests {
     use super::*;
