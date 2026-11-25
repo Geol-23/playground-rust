@@ -5,6 +5,7 @@ const N_PRODUCT_DIGITS: usize = 2 * N_TARGET_DIGITS;
 const START: usize = N_PRODUCT_DIGITS / 4;
 const END: usize = N_PRODUCT_DIGITS - START;
 
+#[derive(Debug, Clone, Copy)]
 pub struct MiddleSquare {
     s: u64,
 }
@@ -16,7 +17,9 @@ impl SeedableRNG for MiddleSquare {
     }
 }
 
-impl RandomNumberGenerator<u64> for MiddleSquare {
+impl RandomNumberGenerator for MiddleSquare {
+    type Bits = u64;
+
     fn next(self: &mut Self) -> u64 {
         let mut buff: [u8; N_PRODUCT_DIGITS] = [0x30; N_PRODUCT_DIGITS];
         let mut new_n: [u8; N_TARGET_DIGITS] = [0x30; N_TARGET_DIGITS];
