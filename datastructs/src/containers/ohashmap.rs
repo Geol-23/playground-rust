@@ -351,6 +351,12 @@ where
         self.entries.is_empty()
     }
 
+    pub fn keys(&self) -> Keys<'_, K, V> {
+        Keys {
+            iter: self.entries.iter(),
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -572,6 +578,18 @@ where
 
     pub fn key(&self) -> &K {
         &self.key
+    }
+}
+
+// Keys -------------------------------------------------------------------------------------------
+pub struct Keys<'a, K, V> {
+    iter: std::slice::Iter<'a, IEntry<K, V>>,
+}
+
+impl<'a, K, V> Iterator for Keys<'a, K, V> {
+    type Item = &'a K;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|e| &e.key)
     }
 }
 
