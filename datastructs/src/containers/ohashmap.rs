@@ -4,6 +4,7 @@ use std::{
     fmt::Debug,
     hash::{BuildHasher, Hash, RandomState},
     iter::FusedIterator,
+    ops::Index,
 };
 
 /* Required Hashmap functions
@@ -411,6 +412,18 @@ where
 
     pub fn with_capacity(capacity: usize) -> Self {
         OrderedHashMap::with_capacity_and_hasher(capacity, Default::default())
+    }
+}
+
+impl<Q, K, V, S> Index<&Q> for OrderedHashMap<K, V, S>
+where
+    K: Borrow<Q> + Hash + Eq,
+    Q: Hash + Eq,
+    S: BuildHasher,
+{
+    type Output = V;
+    fn index(&self, index: &Q) -> &Self::Output {
+        self.get(index).expect("key not found")
     }
 }
 
