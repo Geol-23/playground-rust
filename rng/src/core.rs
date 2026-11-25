@@ -1,5 +1,4 @@
 use std::default::Default;
-use std::marker::PhantomData;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug)]
@@ -29,30 +28,28 @@ impl Default for Seed {
     }
 }
 
-pub struct RandomNumberIterator<R, T> {
+pub struct RandomNumberIterator<R> {
     rng: R,
-    _marker: PhantomData<T>,
 }
-impl<R, T> Iterator for RandomNumberIterator<R, T>
+impl<R> Iterator for RandomNumberIterator<R>
 where
-    R: RandomNumberGenerator<T>,
+    R: RandomNumberGenerator,
 {
-    type Item = T;
+    type Item = R::Bits;
     fn next(&mut self) -> Option<Self::Item> {
         Some(RandomNumberGenerator::next(&mut self.rng))
     }
 }
 
-pub trait RandomNumberGenerator<T>: Sized {
-    fn next(self: &mut Self) -> T;
-    fn iter_mut(self: &mut Self) -> RandomNumberIterator<&mut Self, T>
+pub trait RandomNumberGenerator: Sized {
+    type Bits;
+
+    fn next(self: &mut Self) -> Self::Bits;
+    fn iter_mut(self: &mut Self) -> RandomNumberIterator<&mut Self>
     where
         Self: Sized,
     {
-        RandomNumberIterator {
-            rng: self,
-            _marker: PhantomData,
-        }
+        RandomNumberIterator { rng: self }
     }
 }
 
@@ -63,13 +60,15 @@ pub trait SeedableRNG: Sized {
     }
 }
 
-impl<T, R: RandomNumberGenerator<T> + Sized> RandomNumberGenerator<T> for &mut R {
-    fn next(self: &mut Self) -> T {
+impl<R: RandomNumberGenerator + Sized> RandomNumberGenerator for &mut R {
+    type Bits = R::Bits;
+
+    fn next(self: &mut Self) -> R::Bits {
         (**self).next()
     }
 }
 
-pub trait StatefulRNG: Sized {
+pub trait StatefulRNG: Sized + Clone {
     fn state_set(self: &mut Self, other: &Self);
     fn state_eq(self: &Self, other: &Self) -> bool;
 }
