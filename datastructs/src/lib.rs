@@ -1,5 +1,6 @@
 pub mod containers;
 
+pub use containers::ohashmap::OrderedHashMap;
 
 #[cfg(test)]
 mod tests {
@@ -8,11 +9,8 @@ mod tests {
     mod imct {
         use super::*;
         use containers::table::{
-            imct::{ ColTable},
-            traits::{
-                Table,
-                loc::RowLocView
-            }
+            imct::ColTable,
+            traits::{Table, loc::RowLocView},
         };
 
         fn create_test_table() -> ColTable {

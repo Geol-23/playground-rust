@@ -204,6 +204,9 @@ dependencies = [
 [[package]]
 name = "rng"
 version = "0.1.0"
+dependencies = [
+ "datastructs",
+]
 
 [[package]]
 name = "rustc_version"
