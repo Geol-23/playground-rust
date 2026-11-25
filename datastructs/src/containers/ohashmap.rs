@@ -32,7 +32,7 @@ use std::{
  * [x] is_empty
  * [ ] iter
  * [ ] iter_mut
- * [ ] keys
+ * [x] keys
  * [x] len
  * [x] remove
  * [ ] remove_entry
@@ -351,6 +351,12 @@ where
         self.entries.is_empty()
     }
 
+    pub fn iter(&self) -> Iter<'_, K, V> {
+        Iter {
+            iter: self.entries.iter(),
+        }
+    }
+
     pub fn keys(&self) -> Keys<'_, K, V> {
         Keys {
             iter: self.entries.iter(),
@@ -590,6 +596,18 @@ impl<'a, K, V> Iterator for Keys<'a, K, V> {
     type Item = &'a K;
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|e| &e.key)
+    }
+}
+
+// Iter -------------------------------------------------------------------------------------------
+pub struct Iter<'a, K, V> {
+    iter: std::slice::Iter<'a, IEntry<K, V>>,
+}
+
+impl<'a, K, V> Iterator for Iter<'a, K, V> {
+    type Item = (&'a K, &'a V);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|e| (&e.key, &e.value))
     }
 }
 
