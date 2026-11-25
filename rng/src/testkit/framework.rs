@@ -119,7 +119,10 @@ macro_rules! make_suite {
         seeds: $bg:tt,
         rngs: $rngs:tt,
     ) => {{
-
+        use std::{
+            collections::HashMap,
+            hash::RandomState,
+        };
         use $crate::{
             testkit::{
                 bitgen::{Sampler, SamplerTrait},
@@ -128,13 +131,12 @@ macro_rules! make_suite {
             core::{RandomNumberGenerator, SeedableRNG, Seed},
         };
 
-        [$( $crate::make_suite!( @row $bg; $bm; $rngs; ) ),+]
+        HashMap::<_, _, RandomState>::from_iter([$( (<$bm>::NAME, $crate::make_suite!( @row $bg; $bm; $rngs; ) ) ),+])
     }};
 
     (@row $bg:tt; $bm:ty; [$( $rng:ty ),+ $(,)?];) => {
         [$( run::<$rng, $bm>( $crate::make_suite!(@seed $bg) ) ),+]
     };
-
 
     (@seed [$bgname:ty {$start:expr; $n:expr; $stop:expr}, $($tail:tt)+]) => {
         Sampler::<{ $n }, { $start }, { $stop }>::apply::<$bgname>()
