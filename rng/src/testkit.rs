@@ -1,11 +1,17 @@
+pub mod bitgen;
+pub mod framework;
+pub mod suite;
+
 use std::{
     cmp,
-    ops::{BitAnd, Shr},
+    hint::black_box,
+    ops::Shr,
+    time::{Duration, Instant},
 };
 
 use crate::{
     core::{RandomNumberGenerator, Seed, SeedableRNG, StatefulRNG},
-    testlib::SeedGen::{Function, SampleIter},
+    testkit::bitgen::{Function, SampleIter, SamplerTrait},
 };
 
 #[derive(Clone, Debug)]
@@ -43,9 +49,9 @@ impl StatReport {
 
 impl std::fmt::Display for StatReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "mean: {:?}\n  ", self.mean);
-        write!(f, "std: {:?}\n  ", self.std);
-        write!(f, "min: {:?}\n  ", self.min);
+        write!(f, "mean: {:?}\n  ", self.mean)?;
+        write!(f, "std: {:?}\n  ", self.std)?;
+        write!(f, "min: {:?}\n  ", self.min)?;
         write!(f, "max: {:?}\n  ", self.max)
     }
 }
@@ -189,6 +195,7 @@ where
     }
 }
 
+// Benchmark — Period -----------------------------------------------------------------------------
 #[derive(Debug, Copy, Clone)]
 pub enum Cycle {
     Found(u32, u32),
@@ -215,15 +222,12 @@ impl PeriodBenchReport {
 
 impl std::fmt::Display for PeriodBenchReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} / {} periods found\n", self.n_found, self.n_seeds);
+        write!(f, "{} / {} periods found\n", self.n_found, self.n_seeds)?;
         write!(f, "{:#?}\n{:#?}", self.mu_stats, self.lam_stats)
     }
 }
 
-pub trait RNGPeriodTest<T>: RandomNumberGenerator<T> + SeedableRNG + StatefulRNG
-where
-    T: cmp::Eq + cmp::Ord + Copy,
-{
+pub trait RNGPeriodTest: RandomNumberGenerator + SeedableRNG + StatefulRNG {
     fn floyds_algorithm(seed: Seed, cycle_limit: u32) -> Cycle {
         let mut cycles = 0u32;
         let mut tortise = Self::new(seed);
@@ -302,7 +306,11 @@ where
         Cycle::Found(lam, mu)
     }
 
-    fn benchmark_period<F: Function>(seeds: SampleIter<F>, max_period: u32) -> PeriodBenchReport {
+    fn benchmark_period<F, S>(seeds: SampleIter<F, S>, max_period: u32) -> PeriodBenchReport
+    where
+        F: Function,
+        S: SamplerTrait,
+    {
         let mut mu_stats = Stats::empty();
         let mut lam_stats = Stats::empty();
         let mut n_found: u32 = 0;
@@ -330,11 +338,9 @@ where
     }
 }
 
-impl<T: cmp::Eq + cmp::Ord + Copy, R: RandomNumberGenerator<T> + SeedableRNG + StatefulRNG>
-    RNGPeriodTest<T> for R
-{
-}
+impl<R: RandomNumberGenerator + SeedableRNG + StatefulRNG> RNGPeriodTest for R {}
 
+// Benchmark — Bias -------------------------------------------------------------------------------
 fn chi2_z(counts: &[u64]) -> f64 {
     /*
      * chi2_z is the sum of the squares of the z scores of each bucket
@@ -429,12 +435,16 @@ impl<T> From<BiasAccumulator<T>> for BiasReport {
     }
 }
 
-pub trait RNGBiasTest<T>: RandomNumberGenerator<T> + SeedableRNG
+pub trait RNGBiasTest: RandomNumberGenerator + SeedableRNG
 where
-    T: Shr<u64, Output = T> + Copy,
-    u64: From<T>,
+    Self::Bits: Shr<u64, Output = Self::Bits> + Copy,
+    u64: From<Self::Bits>,
 {
-    fn benchmark_bias<F: Function>(seeds: SampleIter<F>, n_samples: u64) -> BiasReport {
+    fn benchmark_bias<F, S>(seeds: SampleIter<F, S>, n_samples: u64) -> BiasReport
+    where
+        F: Function,
+        S: SamplerTrait,
+    {
         let mut accumulator = BiasAccumulator::new();
         for seed in seeds.map(|i| Seed::new::<u64>(i)) {
             Self::new(seed)
@@ -445,228 +455,77 @@ where
                     a
                 });
         }
-        <BiasReport>::from(accumulator)
+        accumulator.into()
     }
 }
 
-impl<T: Shr<u64, Output = T> + Copy, R: RandomNumberGenerator<T> + SeedableRNG> RNGBiasTest<T> for R where
-    u64: From<T>
+impl<R: RandomNumberGenerator + SeedableRNG> RNGBiasTest for R
+where
+    Self::Bits: Shr<u64, Output = Self::Bits> + Copy,
+    u64: From<Self::Bits>,
 {
 }
 
-pub mod SeedGen {
-    use std::f64;
+// Benchmark — Speed ------------------------------------------------------------------------------
+#[derive(Debug, Clone, Copy)]
+pub struct SpeedReport {
+    n: u64,
+    t: Duration,
+    s: u128,
+}
 
-    pub trait Function: Sized {
-        fn at(self: &Self, i: u64) -> u64;
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    pub struct Linear {
-        a: u64,
-        b: u64,
-    }
-    impl Linear {
-        pub const UNIT: Self = Self { a: 1, b: 0 };
-        const fn new(a: u64, b: u64) -> Self {
-            Self { a, b }
+impl SpeedReport {
+    fn new() -> Self {
+        SpeedReport {
+            n: 0,
+            t: Duration::new(0, 0),
+            s: 0,
         }
     }
-    impl Function for Linear {
-        fn at(self: &Self, i: u64) -> u64 {
-            self.a.wrapping_mul(i).wrapping_add(self.b)
-        }
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    pub struct Quadratic {
-        a: u64,
-        b: u64,
-        c: u64,
-    }
-    impl Quadratic {
-        const UNIT: Self = Self { a: 1, b: 0, c: 0 };
-        fn new(a: u64, b: u64, c: u64) -> Self {
-            Self { a, b, c }
-        }
-    }
-    impl Function for Quadratic {
-        fn at(self: &Self, i: u64) -> u64 {
-            self.a
-                .wrapping_mul(i.wrapping_pow(2))
-                .wrapping_add(self.b.wrapping_mul(i))
-                .wrapping_add(self.c)
-        }
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    pub struct Exponential {
-        a: u64,
-        b: u64,
-    }
-    impl Exponential {
-        const UNIT: Self = Self { a: 0, b: u64::MAX };
-        fn new(a: u64, b: u64) -> Self {
-            Self { a, b }
-        }
-    }
-    impl Function for Exponential {
-        fn at(self: &Self, i: u64) -> u64 {
-            1u64.wrapping_mul(((i.wrapping_add(self.a)) as f64).exp() as u64)
-                .wrapping_add(self.b)
-        }
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    pub struct Decay {
-        a: u64,
-        b: u64,
-    }
-    impl Decay {
-        const UNIT: Self = Self { a: 44, b: 0 };
-        fn new(a: u64, b: u64) -> Self {
-            Self { a, b }
-        }
-    }
-    impl Function for Decay {
-        fn at(self: &Self, i: u64) -> u64 {
-            1u64.wrapping_div(((i.wrapping_add(self.a)) as f64).exp() as u64)
-                .wrapping_add(self.b)
-        }
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    pub struct Sampler {
-        start: u64,
-        stop: u64,
-        n: u64,
-    }
-
-    impl Sampler {
-        pub const fn new(n: u64, start: u64, stop: u64) -> Self {
-            Self { start, stop, n }
-        }
-        pub fn apply<F: Function>(self: Self, f: F) -> SampleIter<F> {
-            SampleIter::new(f, self)
-        }
-        pub fn sample(self: &Self, i: u64) -> u64 {
-            let span = self.start.abs_diff(self.stop); // u64, always >= 0
-            let off = (span as u128 * i as u128 / self.n as u128) as u64;
-            if self.stop >= self.start {
-                self.start + off
-            } else {
-                self.start - off
-            }
-        }
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    pub struct SampleIter<F> {
-        f: F,
-        s: Sampler,
-        c: u64,
-    }
-
-    impl<F: Function> SampleIter<F> {
-        fn new(f: F, s: Sampler) -> Self {
-            Self { f, s, c: 0 }
-        }
-    }
-
-    impl<F: Function> Iterator for SampleIter<F> {
-        type Item = u64;
-        fn next(&mut self) -> Option<Self::Item> {
-            if self.c >= self.s.n {
-                return None;
-            }
-
-            let v = self.f.at(self.s.sample(self.c));
-            self.c += 1;
-
-            Some(v)
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::Sampler;
-        const slimit: Sampler = Sampler::new(3, 0, u64::MAX);
-
-        #[cfg(test)]
-        mod linear {
-            use super::super::{Linear, Sampler};
-            use super::slimit;
-
-            const asc: Linear = Linear::UNIT;
-            const desc: Linear = Linear::new(u64::MAX, 10);
-
-            #[test]
-            fn asc_basic() {
-                let samples: Vec<u64> = Sampler::new(10, 0, 10).apply(asc).collect();
-                dbg!(&samples);
-
-                assert_eq!(samples[0], 0);
-                assert_eq!(samples[5], 5);
-                assert_eq!(samples[9], 9);
-            }
-
-            #[test]
-            fn asc_limit() {
-                let samples: Vec<u64> = slimit.apply(asc).collect();
-                dbg!(&samples);
-
-                assert_eq!(samples[0], 0);
-                assert_eq!(samples[1], u64::MAX / 3);
-                assert_eq!(samples[2], u64::MAX / 3 * 2);
-            }
-
-            #[test]
-            fn desc_basic() {
-                let samples: Vec<u64> = Sampler::new(10, 0, 10).apply(desc).collect();
-                dbg!(&samples);
-
-                assert_eq!(samples[0], 10);
-                assert_eq!(samples[5], 5);
-                assert_eq!(samples[9], 1);
-            }
-
-            #[test]
-            fn desc_limit() {
-                let samples: Vec<u64> = slimit.apply(Linear::new(u64::MAX, u64::MAX)).collect();
-                dbg!(&samples);
-
-                assert_eq!(samples[0], u64::MAX);
-                assert_eq!(samples[1], u64::MAX / 3 * 2);
-                assert_eq!(samples[2], u64::MAX / 3);
-            }
-        }
-
-        #[cfg(test)]
-        mod quadratic {
-            use super::super::{Quadratic, Sampler};
-            use super::slimit;
-
-            #[test]
-            fn quadratic_basic() {
-                let samples: Vec<u64> = Sampler::new(10, 0, 10).apply(Quadratic::UNIT).collect();
-                dbg!(&samples);
-
-                assert_eq!(samples, vec![0, 1, 4, 9, 16, 25, 36, 49, 64, 81]);
-            }
-
-            #[test]
-            fn quadratic_limit() {
-                let samples: Vec<u64> = slimit.apply(Quadratic::UNIT).collect();
-                let target = vec![
-                    0,
-                    (u64::MAX.wrapping_div(3)).wrapping_pow(2),
-                    (u64::MAX.wrapping_div(3).wrapping_mul(2)).wrapping_pow(2),
-                ];
-                dbg!(&samples);
-                dbg!(&target);
-
-                assert_eq!(samples, target)
-            }
-        }
+    fn push(self: &mut Self, n: u64, t: Duration) {
+        self.n += n;
+        self.t += t;
+        self.s = self.t.as_nanos() / (self.n as u128);
     }
 }
+
+impl std::fmt::Display for SpeedReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SpeedReport {{\n")?;
+        write!(f, "    n: {}\n", self.n)?;
+        write!(f, "    t: {:?}\n", self.t)?;
+        write!(f, "    s: {}ns\n", self.s)?;
+        write!(f, "}}\n")
+    }
+}
+
+pub trait RNGSpeedTest: RandomNumberGenerator + SeedableRNG {
+    fn benchmark_speed<F, S>(seeds: SampleIter<F, S>, n_samples: u64) -> SpeedReport
+    where
+        F: Function,
+        S: SamplerTrait,
+    {
+        let mut report = SpeedReport::new();
+        for seed in seeds.map(|i| Seed::new::<u64>(i)) {
+            let mut rng = Self::new(seed);
+
+            // Warmup
+            for _ in 0..10 {
+                black_box(rng.next());
+            }
+
+            // Run
+            let t1 = Instant::now();
+            for _ in 0..n_samples {
+                black_box(rng.next());
+            }
+            let t2 = Instant::now() - t1;
+
+            black_box(rng);
+            report.push(n_samples, t2);
+        }
+        report
+    }
+}
+
+impl<R: RandomNumberGenerator + SeedableRNG> RNGSpeedTest for R {}
