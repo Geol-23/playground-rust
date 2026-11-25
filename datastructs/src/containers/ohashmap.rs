@@ -121,7 +121,7 @@ where
     fn ilookup<Q>(&self, hash: u64, key: &Q) -> ITableIndex
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Hash + Eq + ?Sized,
     {
         let mask = self.itable.len() - 1;
         let mut i_itable = hash as usize & mask;
@@ -146,7 +146,7 @@ where
     fn ilookup_from_key<Q>(&self, key: &Q) -> ITableIndex
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Hash + Eq + ?Sized,
     {
         self.ilookup(self.hasher.hash_one(key), key)
     }
@@ -154,7 +154,7 @@ where
     fn iremove<Q>(&mut self, hash: u64, key: &Q) -> Option<(K, V)>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Hash + Eq + ?Sized,
     {
         // Check if entry exists
         if self.itable.is_empty() {
@@ -184,7 +184,7 @@ where
     fn iremove_from_key<Q>(&mut self, key: &Q) -> Option<(K, V)>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Hash + Eq + ?Sized,
     {
         self.iremove(self.hasher.hash_one(key), key)
     }
@@ -267,7 +267,7 @@ where
     pub fn contains_key<Q>(&self, k: &Q) -> bool
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Hash + Eq + ?Sized,
     {
         if self.itable.is_empty() {
             return false;
@@ -317,7 +317,7 @@ where
     pub fn get<Q>(&self, k: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Hash + Eq + ?Sized,
     {
         if self.itable.is_empty() {
             return None;
@@ -371,7 +371,7 @@ where
     pub fn remove<Q>(&mut self, k: &Q) -> Option<V>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Hash + Eq + ?Sized,
     {
         self.iremove_from_key(k).map(|(_, v)| v)
     }
@@ -418,7 +418,7 @@ where
 impl<Q, K, V, S> Index<&Q> for OrderedHashMap<K, V, S>
 where
     K: Borrow<Q> + Hash + Eq,
-    Q: Hash + Eq,
+    Q: Hash + Eq + ?Sized,
     S: BuildHasher,
 {
     type Output = V;
