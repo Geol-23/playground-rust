@@ -1,3 +1,3 @@
 pub mod core;
 pub mod generators;
-pub mod testlib;
+pub mod testkit;
